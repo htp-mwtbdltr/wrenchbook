@@ -3,22 +3,88 @@
 A self-hosted maintenance manual and service log for everything with an engine: cars, trucks, mowers, snowblowers,
 generators, trailers, boats.
 
-- **Spec sheets.** Each vehicle or machine gets editable sections for parts and part numbers, fluids and capacities,
-  bolts, sockets and torque, tires, bulbs, belts and electrical, plus custom sections with any columns.
-  Tap a value to copy it. Each spec sheet prints as a one-page reference for the garage wall.
-- **Service log.** Each entry records the date, odometer or hours, category, who did the work, cost, parts used
-  (part numbers autocomplete from the spec sheet), notes in Markdown, and photos or receipts.
-- **Schedule.** Service intervals such as "every 5,000 mi or 6 months", by miles, km, engine hours and/or months.
-  Logging an entry against an interval resets it, and the garage dashboard lists anything overdue or coming due.
-- **Guides.** Your own repair manual: step-by-step how-tos with photos, tool and part lists and torque tables. A guide
-  can be tied to specific machines or left general, and linked from a schedule item.
-- **Files.** Each machine has its own photos, receipts and PDF manuals, plus a cover photo.
-- **Templates for each kind.** A new snowblower starts with shear pins, belts, spark plug and pre-season tasks; a new car
-  starts with filters, fluids, bulbs and the usual intervals. All of it is editable.
-- **Search** covers part numbers, bulbs, fluids, VINs, past jobs and guides.
+Most vehicle trackers are built around fuel-ups and oil-change dates. Wrenchbook is closer to the manual you'd keep in
+the glovebox: the fluids, part numbers, socket sizes, torque specs and bulbs for each machine, next to a full history of
+what's been done to it and what's coming due.
 
-Everything runs in one small container: FastAPI, plain JS with no build step, and SQLite. Light and dark themes.
-The layout works on a phone, with a bottom nav bar for use in the garage.
+![Garage dashboard](docs/screenshots/garage.png)
+
+<sub>Screenshots use made-up demo data.</sub>
+
+## Features
+
+### Spec sheets
+Each vehicle or machine gets editable sections:
+- parts and part numbers
+- fluids and capacities
+- bolts, sockets and torque
+- tires and wheels
+- bulbs
+- belts
+- battery and electrical
+- custom sections with any columns you like
+
+Tap any value to copy it, which is handy at the parts counter. A spec sheet prints as a one-page reference for the
+garage wall.
+
+![Spec sheet](docs/screenshots/spec-sheet.png)
+
+### Service log
+Each entry records:
+- date and odometer or hours
+- category and who did the work
+- cost
+- parts used (part numbers autocomplete from the spec sheet)
+- notes (Markdown works)
+- photos and receipts
+
+Entries are grouped by year, with spending totals. There's also a log for the whole garage with filters and search.
+
+| Timeline | Logging an entry |
+|---|---|
+| ![Service log](docs/screenshots/service-log.png) | ![Log entry](docs/screenshots/log-entry.png) |
+
+### Schedule
+Service intervals like "every 5,000 mi or 6 months" can be set in miles, km, engine hours and/or months. Each one is
+due at whichever limit comes first. Logging an entry against an interval resets it. The garage dashboard lists
+everything that's overdue or coming up, with a one-click **Log it** button.
+
+![Schedule](docs/screenshots/schedule.png)
+
+### Guides
+Guides are your own repair manual: step-by-step how-tos with photos, checklists, warnings, torque tables, and tool and
+part lists. A guide can be tied to specific machines or left general, and linked from a schedule item.
+
+![Guide](docs/screenshots/guide.png)
+
+### VIN decode and AI fill
+- **VIN decode:** enter a VIN when adding a vehicle and click **Decode**. Year, make, model, trim and engine come from
+  NHTSA's free vPIC database, and the right kind (car, truck, van…) is picked for you. No API key needed.
+- **Fill with AI:** copy a prompt written for that vehicle into ChatGPT, Claude or anything else, then paste the JSON
+  reply back. You preview the changes before importing. By default only blanks get filled in, and the AI's sources
+  are saved in the vehicle's notes. Wrenchbook itself has no API key or AI integration.
+- **Agents:** `/llms.txt` documents the JSON API, so an AI agent that can make web requests can add vehicles, merge
+  specs (with a dry run first), log service and upload manuals.
+
+| VIN decode | Fill with AI |
+|---|---|
+| ![VIN decode](docs/screenshots/vin-decode.png) | ![Fill with AI](docs/screenshots/ai-fill.png) |
+
+### Everything else
+- **Templates for each kind.** A new snowblower starts with shear pins, belts, spark plug and pre-season tasks; a new
+  car starts with filters, fluids, bulbs and the usual intervals. All of it is editable.
+- **Files:** photos, receipts and PDF manuals for each machine, plus a cover photo.
+- **Search** covers part numbers, bulbs, fluids, VINs, past jobs and guides. Search `7443` to see every vehicle that
+  uses that bulb.
+- **Light and dark themes**, and a phone layout with a bottom nav bar for use in the garage.
+
+| Phone | Phone | Phone (dark) |
+|---|---|---|
+| ![Mobile garage](docs/screenshots/mobile-garage.png) | ![Mobile spec sheet](docs/screenshots/mobile-spec.png) | ![Mobile schedule](docs/screenshots/mobile-schedule.png) |
+
+![Dark mode](docs/screenshots/garage-dark.png)
+
+Everything runs in one small container: FastAPI, plain JS with no build step, and SQLite.
 
 ## Deploy
 
@@ -44,3 +110,4 @@ To move to another PC, copy `data/` across (stop the container first so the SQLi
 | **Reverse proxy** | Nginx Proxy Manager | Not set up yet. |
 
 `/api/export` (the **Export** button in the sidebar) downloads a JSON dump of the database. It doesn't include uploaded files.
+VIN decode needs outbound internet access to `vpic.nhtsa.dot.gov`.

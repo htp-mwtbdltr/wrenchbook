@@ -93,6 +93,7 @@ const money = n => n == null || n === '' ? '' : Number(n).toLocaleString(undefin
 const fmtReading = (v, u) => v == null || u === 'none' ? '' : `${fmtNum(v, u === 'hr' ? 1 : 0)} ${UNIT_SHORT[u] || ''}`.trim();
 const readingLabel = u => u === 'hr' ? 'Hour meter' : u === 'none' ? '' : 'Odometer';
 const fmtSize = b => b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : (w.endsWith('y') ? 'ies' : 's')}`.replace(/yies$/, 'ies');
 const monthsText = m => m % 12 === 0 ? (m === 12 ? 'year' : `${m / 12} years`) : (m === 1 ? 'month' : `${m} months`);
 
 function everyText(t, unit) {
@@ -328,7 +329,7 @@ function assetCard(a) {
     <div class="info">
       <div class="name">${a.name}</div>
       <div class="meta">${a.title || kindLabel(a.kind)}</div>
-      <div class="foot">${a.usage_unit !== 'none' ? html`${icon('gauge')}<span>${fmtReading(a.current_reading, a.usage_unit) || '—'}</span>` : html`${icon('clipboard')}<span>${a.log_count} entries</span>`}
+      <div class="foot">${a.usage_unit !== 'none' ? html`${icon('gauge')}<span>${fmtReading(a.current_reading, a.usage_unit) || '—'}</span>` : html`${icon('clipboard')}<span>${plural(a.log_count, 'entry')}</span>`}
         <span class="r">${a.last_service ? `Last: ${fmtDate(a.last_service.date, { month: 'short', year: 'numeric' })}` : 'No service yet'}</span></div>
     </div></a>`;
 }
@@ -436,10 +437,10 @@ function tabLog(a) {
   const years = {};
   a.logs.forEach(l => (years[l.date.slice(0, 4)] ||= []).push(l));
   return html`
-    <div class="toolbar"><div class="totals" style="margin-left:0"><span><b>${a.logs.length}</b> entries</span><span><b>${money(total)}</b> all time</span></div>
+    <div class="toolbar"><div class="totals" style="margin-left:0"><span><b>${a.logs.length}</b> ${a.logs.length === 1 ? 'entry' : 'entries'}</span><span><b>${money(total)}</b> all time</span></div>
       <div style="margin-left:auto"><button class="btn primary" data-act="log-new">${icon('plus')} Log service</button></div></div>
     ${Object.keys(years).sort().reverse().map(y => html`
-      <div class="year-head"><h3>${y}</h3><span class="muted">${years[y].length} entries · ${money(years[y].reduce((s, l) => s + (l.cost || 0), 0))}</span></div>
+      <div class="year-head"><h3>${y}</h3><span class="muted">${plural(years[y].length, 'entry')} · ${money(years[y].reduce((s, l) => s + (l.cost || 0), 0))}</span></div>
       <div class="timeline">${years[y].map(l => entryCard(l, a.usage_unit))}</div>`)}`;
 }
 function entryCard(l, unit, assetName) {
@@ -781,7 +782,7 @@ function importSummary(r) {
   if (r.sections_new.length) items.push(`New sections: ${r.sections_new.join(', ')}`);
   if (r.sections_updated.length) items.push(`Updated sections: ${r.sections_updated.join(', ')}`);
   if (r.rows_added || r.rows_updated) items.push(`Spec rows: ${r.rows_added} added, ${r.rows_updated} filled in`);
-  if (r.tasks_added || r.tasks_updated) items.push(`Schedule: ${r.tasks_added} intervals added, ${r.tasks_updated} updated`);
+  if (r.tasks_added || r.tasks_updated) items.push(`Schedule: ${plural(r.tasks_added, 'interval')} added, ${r.tasks_updated} updated`);
   return html`${items.length ? html`<ul style="margin:6px 0 0;padding-left:20px">${items.map(i => html`<li>${i}</li>`)}</ul>` : html`<div class="muted">Nothing new: everything in the reply is already on file.</div>`}
     ${r.skipped.length ? html`<div style="font-size:12.5px;color:var(--warn);margin-top:6px">Skipped: ${r.skipped.join('; ')}</div>` : ''}`;
 }
@@ -891,7 +892,7 @@ async function pageLog() {
       && (!q || [l.title, l.notes, l.performed_by, l.category, l.asset_name, ...l.parts.flatMap(p => [p.name, p.number])].join(' ').toLowerCase().includes(q)));
     const total = rows.reduce((s, l) => s + (l.cost || 0), 0);
     $('#log-results').innerHTML = (rows.length ? html`
-      <div class="toolbar"><div class="totals" style="margin-left:0"><span><b>${rows.length}</b> entries</span><span><b>${money(total)}</b> total</span></div></div>
+      <div class="toolbar"><div class="totals" style="margin-left:0"><span><b>${rows.length}</b> ${rows.length === 1 ? 'entry' : 'entries'}</span><span><b>${money(total)}</b> total</span></div></div>
       <div class="card"><div class="table-wrap"><table class="data">
         <thead><tr><th>Date</th><th>Vehicle / equipment</th><th>Work</th><th class="hide-sm">Category</th><th class="num hide-sm">Reading</th><th class="num">Cost</th></tr></thead>
         <tbody>${rows.map(l => html`<tr class="click" data-act="log-edit" data-id="${l.id}">
