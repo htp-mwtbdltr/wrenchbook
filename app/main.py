@@ -6,16 +6,18 @@ import mimetypes
 import os
 import re
 import secrets
+import urllib.request
 import uuid
 from datetime import date
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
+from . import agent_docs
 from . import db as store
 from . import presets
 from .db import FILES_DIR, db, now
@@ -700,6 +702,250 @@ def delete_file(fid: int):
         conn.execute("UPDATE assets SET photo_id = NULL WHERE photo_id = ?", (fid,))
         conn.execute("DELETE FROM files WHERE id = ?", (fid,))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- VIN decode (NHTSA vPIC)
+
+VPIC_URL = "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/{}?format=json"
+
+
+def nice_case(s):
+    """NHTSA returns makes in caps: HONDA -> Honda, MERCEDES-BENZ -> Mercedes-Benz, but keep BMW/GMC."""
+    if not s or not s.isupper() or len(s) <= 3:
+        return s
+    return " ".join(w if w.startswith("(") else "-".join(p.capitalize() for p in w.split("-")) for w in s.split(" "))
+
+
+def vin_kind(vehicle_type, body):
+    vt, b = vehicle_type.upper(), body.lower()
+    if "MOTORCYCLE" in vt:
+        return "motorcycle"
+    if "TRAILER" in vt:
+        return "trailer"
+    if "OFF ROAD" in vt or "LOW SPEED" in vt:
+        return "atv"
+    if "pickup" in b:
+        return "truck"
+    if "van" in b:
+        return "van"
+    if "sport utility" in b or "crossover" in b:
+        return "suv"
+    if "TRUCK" in vt:
+        return "truck"
+    return "car"
+
+
+@app.get("/api/vin/{vin}")
+def decode_vin(vin: str):
+    vin = re.sub(r"[^A-Za-z0-9]", "", vin).upper()
+    if len(vin) < 11:
+        raise HTTPException(400, "A VIN is 17 characters (older vehicles may be shorter)")
+    try:
+        with urllib.request.urlopen(VPIC_URL.format(vin), timeout=15) as r:
+            res = json.load(r)["Results"][0]
+    except Exception as e:
+        raise HTTPException(502, f"NHTSA lookup failed: {e}")
+    g = lambda k: (res.get(k) or "").strip()
+    if not g("Make"):
+        raise HTTPException(404, g("ErrorText") or "NHTSA couldn't decode this VIN")
+    engine = []
+    if g("DisplacementL"):
+        try:
+            engine.append(f"{float(g('DisplacementL')):.1f}L")
+        except ValueError:
+            pass
+    cyl, conf = g("EngineCylinders"), g("EngineConfiguration").lower()
+    if cyl:
+        engine.append(f"V{cyl}" if conf.startswith("v") else f"H{cyl}" if "opposed" in conf else f"I{cyl}" if "line" in conf else f"{cyl}cyl")
+    if g("Turbo").lower() == "yes":
+        engine.append("Turbo")
+    if g("EngineModel"):
+        engine.append(g("EngineModel"))
+    fuel = g("FuelTypePrimary")
+    if fuel and fuel.lower() != "gasoline":
+        engine.append(fuel)
+    details = {k: v for k, v in {
+        "Body": g("BodyClass"), "Drive": g("DriveType"), "Transmission": " ".join(x for x in (g("TransmissionSpeeds") and g("TransmissionSpeeds") + "-speed", g("TransmissionStyle")) if x),
+        "Fuel": fuel, "Doors": g("Doors"), "Built in": ", ".join(x for x in (nice_case(g("PlantCity")), nice_case(g("PlantCountry"))) if x),
+    }.items() if v}
+    code = g("ErrorCode")
+    return {
+        "vin": vin,
+        "fields": {"year": g("ModelYear"), "make": nice_case(g("Make")), "model": g("Model"),
+                   "trim": g("Trim") or g("Series"), "engine": " ".join(engine)},
+        "kind": vin_kind(g("VehicleType"), g("BodyClass")),
+        "details": details,
+        "warning": "" if code in ("", "0") else g("ErrorText"),
+    }
+
+
+# ---------------------------------------------------------------- AI / agent import
+
+TEMPLATE_WORDS = {"fluids": ["fluid"], "fasteners": ["bolt", "torque", "socket", "fastener"], "tires": ["tire", "tyre", "wheel"],
+                  "bulbs": ["bulb", "light"], "belts": ["belt"], "electrical": ["electr", "battery"], "parts": ["part", "filter"]}
+
+
+def infer_template(title, given=None):
+    if given in presets.SECTION_TEMPLATES:
+        return given
+    t = title.lower()
+    for key, words in TEMPLATE_WORDS.items():
+        if any(w in t for w in words):
+            return key
+    return "custom"
+
+
+def norm(s):
+    return clean(s).lower()
+
+
+def apply_import(conn, aid, data):
+    """Merge LLM/agent-supplied specs into an asset. Fills blanks only unless data["overwrite"] is true."""
+    if not isinstance(data, dict):
+        raise HTTPException(400, "Expected a JSON object")
+    a = get_or_404(conn, "assets", aid)
+    overwrite = bool(data.get("overwrite"))
+    out = {"asset_fields": [], "sections_new": [], "sections_updated": [], "rows_added": 0, "rows_updated": 0,
+           "tasks_added": 0, "tasks_updated": 0, "skipped": []}
+
+    fields = data.get("asset") or {}
+    upd = {k: fields[k] for k in ("year", "make", "model", "trim", "engine", "vin", "plate", "color", "notes")
+           if clean(fields.get(k)) and (overwrite or not a[k])}
+    sources = [clean(s) for s in data.get("sources") or [] if clean(s)]
+    if sources:
+        notes = upd.get("notes", a["notes"]) or ""
+        upd["notes"] = (notes.rstrip() + "\n\n" if notes.strip() else "") + f"Spec sources ({date.today()}):\n" + "\n".join(f"- <{s}>" for s in sources)
+    if upd:
+        vals = asset_values(upd, partial=True)
+        vals["updated"] = now()
+        conn.execute(f"UPDATE assets SET {', '.join(f'{k} = ?' for k in vals)} WHERE id = ?", [*vals.values(), aid])
+        out["asset_fields"] = [k for k in upd if k != "notes" or "notes" in fields]
+
+    existing = {norm(s["title"]): s for s in conn.execute("SELECT * FROM sections WHERE asset_id = ? ORDER BY sort", (aid,))}
+    for sec in data.get("sections") or []:
+        if not isinstance(sec, dict):
+            continue
+        title, cols = clean(sec.get("title")), [clean(c) for c in sec.get("columns") or [] if clean(c)]
+        if not title or not cols:
+            out["skipped"].append(f"section without title/columns: {title or '?'}")
+            continue
+        rows = []
+        for r in sec.get("rows") or []:
+            r = [clean(r.get(c, "")) for c in cols] if isinstance(r, dict) else [clean(x) for x in r]
+            r = (r + [""] * len(cols))[:len(cols)]
+            if any(r):
+                rows.append(r)
+        s = existing.get(norm(title))
+        if not s:
+            tkey = infer_template(title, sec.get("template"))
+            sort = conn.execute("SELECT COALESCE(MAX(sort), -1) + 1 FROM sections WHERE asset_id = ?", (aid,)).fetchone()[0]
+            conn.execute("INSERT INTO sections (asset_id, template, title, columns, rows, note, sort) VALUES (?,?,?,?,?,?,?)",
+                         (aid, tkey, title, json.dumps(cols), json.dumps(rows), clean(sec.get("note")), sort))
+            out["sections_new"].append(title)
+            out["rows_added"] += len(rows)
+            continue
+        ecols, erows = json.loads(s["columns"]), json.loads(s["rows"])
+        idx = []
+        for c in cols:  # map incoming columns onto existing ones by name; add any new columns
+            i = next((j for j, e in enumerate(ecols) if norm(e) == norm(c)), None)
+            if i is None:
+                ecols.append(c)
+                for er in erows:
+                    er.append("")
+                i = len(ecols) - 1
+            idx.append(i)
+        if norm(cols[0]) != norm(ecols[0]):
+            idx[0] = 0  # first column is always the row label, whatever it's called
+        added = updated = 0
+        for r in rows:
+            target = next((er for er in erows if r[0] and norm(er[0]) == norm(r[0])), None)
+            if target is None:
+                new = [""] * len(ecols)
+                for v, i in zip(r, idx):
+                    new[i] = v
+                erows.append(new)
+                added += 1
+            else:
+                changed = False
+                for v, i in zip(r, idx):
+                    if v and target[i] != v and (overwrite or not target[i]):
+                        target[i] = v
+                        changed = True
+                updated += changed
+        note = s["note"]
+        if clean(sec.get("note")) and (overwrite or not note):
+            note = clean(sec.get("note"))
+        conn.execute("UPDATE sections SET columns = ?, rows = ?, note = ? WHERE id = ?", (json.dumps(ecols), json.dumps(erows), note, s["id"]))
+        if added or updated:
+            out["sections_updated"].append(s["title"])
+        out["rows_added"] += added
+        out["rows_updated"] += updated
+
+    etasks = {norm(t["name"]): t for t in conn.execute("SELECT * FROM tasks WHERE asset_id = ?", (aid,))}
+    for t in data.get("tasks") or []:
+        if not isinstance(t, dict):
+            continue
+        if a["usage_unit"] == "none":
+            t = {**t, "every_dist": None}
+        try:
+            vals = task_values(t)
+        except HTTPException as e:
+            out["skipped"].append(f"task {clean(t.get('name')) or '?'}: {e.detail}")
+            continue
+        cur = etasks.get(norm(vals["name"]))
+        if cur:
+            changes = {k: v for k, v in vals.items() if k in ("category", "every_dist", "every_months", "notes")
+                       and v not in (None, "") and v != cur[k] and (overwrite or cur[k] in (None, ""))}
+            if changes:
+                conn.execute(f"UPDATE tasks SET {', '.join(f'{k} = ?' for k in changes)} WHERE id = ?", [*changes.values(), cur["id"]])
+                out["tasks_updated"] += 1
+        else:
+            vals["guide_id"] = None
+            sort = conn.execute("SELECT COALESCE(MAX(sort), -1) + 1 FROM tasks WHERE asset_id = ?", (aid,)).fetchone()[0]
+            conn.execute("INSERT INTO tasks (asset_id, name, category, every_dist, every_months, notes, guide_id, sort, created) VALUES (?,?,?,?,?,?,?,?,?)",
+                         (aid, *vals.values(), sort, now()))
+            out["tasks_added"] += 1
+    return out
+
+
+@app.post("/api/assets/{aid}/import")
+def import_into_asset(aid: int, dry_run: bool = False, data: dict = Body(...)):
+    with db() as conn:
+        summary = apply_import(conn, aid, data)
+        if dry_run:
+            conn.rollback()
+    return {"dry_run": dry_run, **summary}
+
+
+@app.post("/api/import")
+def import_new_asset(dry_run: bool = False, data: dict = Body(...)):
+    """Create an asset and its specs in one call (for agents)."""
+    fields = dict(data.get("asset") or {})
+    vals = asset_values(fields)
+    if not fields.get("usage_unit"):
+        vals["usage_unit"] = presets.kind_preset(vals["kind"])["unit"]
+    vals["created"] = vals["updated"] = now()
+    with db() as conn:
+        aid = conn.execute(f"INSERT INTO assets ({', '.join(vals)}) VALUES ({', '.join('?' * len(vals))})", list(vals.values())).lastrowid
+        if data.get("template"):
+            apply_template(conn, aid, vals["kind"])
+        summary = apply_import(conn, aid, {**data, "asset": {}, "overwrite": True})
+        if dry_run:
+            conn.rollback()
+    return {"id": None if dry_run else aid, "dry_run": dry_run, **summary}
+
+
+@app.get("/api/assets/{aid}/prompt", response_class=PlainTextResponse)
+def asset_prompt(aid: int):
+    with db() as conn:
+        a = get_or_404(conn, "assets", aid)
+        sections = [section_dict(s) for s in conn.execute("SELECT * FROM sections WHERE asset_id = ? ORDER BY sort, id", (aid,))]
+    return agent_docs.asset_prompt(a, sections)
+
+
+@app.get("/llms.txt", response_class=PlainTextResponse)
+def llms_txt(request: Request):
+    return agent_docs.llms_txt(str(request.base_url).rstrip("/"))
 
 
 # ---------------------------------------------------------------- search / export

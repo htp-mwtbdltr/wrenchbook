@@ -42,6 +42,7 @@ const ICONS = {
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  sparkle: '<path d="M12 3l1.9 5.8L20 10.7l-6.1 1.9L12 18.5l-1.9-5.9L4 10.7l6.1-1.9z"/><path d="M19 3v4M17 5h4M5 17v4M3 19h4"/>',
   checklist: '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8M13 12h8M13 18h8"/>',
   // vehicles & equipment
   car: '<path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/>',
@@ -379,10 +380,10 @@ function tabSpecs(a) {
     ${a.notes ? html`<div class="callout">${icon('info')}<div class="md">${raw(a.notes_html)}</div></div>` : ''}
     ${a.sections.length ? html`
       <div class="toolbar no-print"><span class="muted tip" style="font-size:13px">${icon('copy')}Tap any value to copy it, handy at the parts counter.</span>
-        <div style="margin-left:auto"><button class="btn" data-act="section-add">${icon('plus')} Add section</button></div></div>
+        <div style="margin-left:auto;display:flex;gap:8px"><button class="btn" data-act="ai-fill">${icon('sparkle')} Fill with AI</button><button class="btn" data-act="section-add">${icon('plus')} Add section</button></div></div>
       <div class="specs">${a.sections.map(sectionCard)}</div>`
     : html`<div class="card empty">${icon('list')}<h3>No spec sheet yet</h3><p>Record fluids, part numbers, socket sizes, tire sizes and bulbs: everything you look up when you're elbow-deep in the job.</p>
-        <div style="display:flex;gap:8px;justify-content:center"><button class="btn" data-act="section-add">${icon('plus')} Add a section</button><button class="btn primary" data-act="apply-template" data-what="sections">Use the ${kindLabel(a.kind).toLowerCase()} template</button></div></div>`}`;
+        <div style="display:flex;gap:8px;justify-content:center"><button class="btn" data-act="section-add">${icon('plus')} Add a section</button><button class="btn" data-act="apply-template" data-what="sections">Use the ${kindLabel(a.kind).toLowerCase()} template</button><button class="btn primary" data-act="ai-fill">${icon('sparkle')} Fill with AI</button></div></div>`}`;
 }
 function sectionCard(s) {
   const ed = S.editing[s.id];
@@ -545,14 +546,17 @@ function openAssetForm(a = null) {
       <div class="kind-grid">${kinds.map(k => html`<button type="button" class="kind-opt ${k.key === kind ? 'on' : ''}" data-kind="${k.key}">${icon(KIND_ICON[k.key])}${k.label}</button>`)}</div>
       <div class="sub-head">Details</div>
       <div class="grid-form">
-        ${f('name', 'Name *', 'required autofocus placeholder="e.g. Odyssey, Toro mower"', 'c3')}
+        <div class="field c3"><span id="vin-label">${isVehicle(kind) ? 'VIN' : 'Model / serial number'}</span>
+          <div style="display:flex;gap:6px"><input name="vin" value="${a.vin ?? ''}" class="mono" style="text-transform:uppercase" placeholder="${isVehicle(kind) ? '17 characters' : ''}">
+          <button type="button" class="btn ${isNew ? 'primary' : ''} ${isVehicle(kind) ? '' : 'hidden'}" id="vin-decode" title="Look up year, make, model and engine from NHTSA">${icon('search')} Decode</button></div></div>
+        ${f('name', 'Name *', 'required placeholder="e.g. Odyssey, Toro mower"', 'c3')}
+        <div class="c6 hidden" id="vin-info"></div>
         ${f('year', 'Year', 'inputmode="numeric" placeholder="2024"', '')}
-        ${f('color', 'Color', '', 'c2')}
         ${f('make', 'Make', 'placeholder="Honda"')}
         ${f('model', 'Model', 'placeholder="Odyssey"')}
+        ${f('color', 'Color', '', '')}
         ${f('trim', 'Trim / model number', 'placeholder="Touring"')}
-        ${f('engine', 'Engine', 'placeholder="3.5L V6 J35Y7"', 'c3')}
-        <label class="field c3"><span id="vin-label">${isVehicle(kind) ? 'VIN' : 'Serial number'}</span><input name="vin" value="${a.vin ?? ''}" class="mono" style="text-transform:uppercase"></label>
+        ${f('engine', 'Engine', 'placeholder="3.5L V6 J35Y7"', 'c4')}
         ${f('plate', 'License plate')}
         <label class="field c2"><span>Track usage by</span><select name="usage_unit">${Object.entries(S.meta.units).map(([k, l]) => html`<option value="${k}" ${a.usage_unit === k ? 'selected' : ''}>${l}</option>`)}</select></label>
         ${f('purchase_reading', 'Reading when acquired', 'inputmode="decimal"')}
@@ -570,10 +574,32 @@ function openAssetForm(a = null) {
   $$('.kind-opt', m.el).forEach(b => b.onclick = () => {
     kind = b.dataset.kind;
     $$('.kind-opt', m.el).forEach(x => x.classList.toggle('on', x === b));
-    $('#vin-label', m.el).textContent = isVehicle(kind) ? 'VIN' : 'Serial number';
+    $('#vin-label', m.el).textContent = isVehicle(kind) ? 'VIN' : 'Model / serial number';
+    $('#vin-decode', m.el).classList.toggle('hidden', !isVehicle(kind));
     if (!unitTouched) $('[name=usage_unit]', form).value = kindMeta(kind).unit;
     const t = $('#tpl-kind', m.el); if (t) t.textContent = kindLabel(kind).toLowerCase();
   });
+  const decode = async () => {
+    const vin = form.vin.value.trim();
+    if (!vin) return toast('Enter a VIN first', true);
+    const btn = $('#vin-decode', m.el); btn.disabled = true;
+    try {
+      const r = await GET(`/api/vin/${encodeURIComponent(vin)}`);
+      form.vin.value = r.vin;
+      for (const [k, v] of Object.entries(r.fields)) if (v) form[k].value = v;
+      if (!form.name.value.trim()) form.name.value = r.fields.model || r.fields.make;
+      if (isNew && r.kind !== kind) $(`.kind-opt[data-kind="${r.kind}"]`, m.el)?.click();
+      const info = $('#vin-info', m.el);
+      info.innerHTML = html`<div class="callout" style="margin:0">${icon(r.warning ? 'alert' : 'check')}<div>
+        <b>${[r.fields.year, r.fields.make, r.fields.model, r.fields.trim].filter(Boolean).join(' ')}</b>
+        <div class="muted" style="font-size:13px">${Object.entries(r.details).map(([k, v]) => `${k}: ${v}`).join(' · ')}</div>
+        ${r.warning ? html`<div style="font-size:12.5px;color:var(--warn)">NHTSA: ${r.warning}</div>` : ''}</div></div>`.s;
+      info.classList.remove('hidden');
+    } catch (e) { fail(e); }
+    btn.disabled = false;
+  };
+  $('#vin-decode', m.el).onclick = decode;
+  form.vin.addEventListener('keydown', e => { if (e.key === 'Enter' && isVehicle(kind)) { e.preventDefault(); decode(); } });
   const save = async () => {
     if (!form.reportValidity()) return;
     const data = { ...formData(form), kind };
@@ -739,6 +765,54 @@ async function openLogForm({ asset = null, assetId = null, log = null, taskId = 
     if (!await confirmBox(html`Delete <b>${log.title}</b> from ${fmtDate(log.date)}? Its attachments are deleted too.`)) return;
     try { await DEL(`/api/logs/${log.id}`); m.close(); toast('Deleted'); await refresh(); } catch (e) { fail(e); }
   };
+}
+
+// ------------------------------------------------------------------ AI fill (copy prompt -> paste JSON)
+function parseLlmJson(text) {
+  const t = text.trim();
+  const a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a < 0 || b <= a) throw new Error("Couldn't find a JSON object in the reply");
+  try { return JSON.parse(t.slice(a, b + 1)); }
+  catch (e) { throw new Error(`The reply isn't valid JSON: ${e.message}`); }
+}
+function importSummary(r) {
+  const items = [];
+  if (r.asset_fields.length) items.push(`Details: ${r.asset_fields.join(', ')}`);
+  if (r.sections_new.length) items.push(`New sections: ${r.sections_new.join(', ')}`);
+  if (r.sections_updated.length) items.push(`Updated sections: ${r.sections_updated.join(', ')}`);
+  if (r.rows_added || r.rows_updated) items.push(`Spec rows: ${r.rows_added} added, ${r.rows_updated} filled in`);
+  if (r.tasks_added || r.tasks_updated) items.push(`Schedule: ${r.tasks_added} intervals added, ${r.tasks_updated} updated`);
+  return html`${items.length ? html`<ul style="margin:6px 0 0;padding-left:20px">${items.map(i => html`<li>${i}</li>`)}</ul>` : html`<div class="muted">Nothing new: everything in the reply is already on file.</div>`}
+    ${r.skipped.length ? html`<div style="font-size:12.5px;color:var(--warn);margin-top:6px">Skipped: ${r.skipped.join('; ')}</div>` : ''}`;
+}
+async function openAiFill(a) {
+  let prompt;
+  try { prompt = await (await fetch(`/api/assets/${a.id}/prompt`)).text(); } catch (e) { return fail(e); }
+  const m = modal({
+    title: `Fill ${a.name} with AI`, cls: 'wide',
+    body: html`<p class="muted" style="margin:0 0 4px">Use ChatGPT, Claude, Gemini or whatever you like; turn on web search if it has it. Wrenchbook doesn't need an API key for this.</p>
+      <div class="sub-head">1 · Copy this prompt into your AI <button type="button" class="btn sm primary" id="ai-copy" style="margin-left:auto">${icon('copy')} Copy prompt</button></div>
+      <label class="field"><textarea readonly rows="7" class="mono" style="font-size:12.5px">${prompt}</textarea></label>
+      <div class="sub-head">2 · Paste its reply here</div>
+      <label class="field"><textarea id="ai-reply" rows="8" class="mono" style="font-size:12.5px" placeholder='{ "sections": [ ... ], "tasks": [ ... ] }'></textarea></label>
+      <label class="check" style="margin-top:10px"><input type="checkbox" id="ai-over"><span>Replace values I already have (otherwise only blanks are filled in)</span></label>
+      <div id="ai-preview" style="margin-top:12px"></div>
+      <p class="faint" style="font-size:12.5px;margin:14px 0 0">Using an AI agent that can make web requests? Point it at <a href="/llms.txt" target="_blank" class="mono" style="color:var(--accent-text)">${location.origin}/llms.txt</a>. It can update this entry (id ${a.id}) or add new ones directly.</p>`,
+    foot: html`<div class="r"><button class="btn" data-close>Cancel</button><button class="btn" id="ai-check">${icon('search')} Preview changes</button><button class="btn primary" id="ai-import">${icon('check')} Import</button></div>`,
+  });
+  $('#ai-copy', m.el).onclick = () => copyText(prompt);
+  const run = async dry => {
+    let data;
+    try { data = parseLlmJson($('#ai-reply', m.el).value); } catch (e) { return fail(e); }
+    data.overwrite = $('#ai-over', m.el).checked;
+    try {
+      const r = await POST(`/api/assets/${a.id}/import${dry ? '?dry_run=true' : ''}`, data);
+      if (dry) { $('#ai-preview', m.el).innerHTML = html`<div class="callout" style="margin:0">${icon('info')}<div><b>This import would change:</b>${importSummary(r)}</div></div>`.s; return; }
+      m.close(); toast('Imported'); await refresh();
+    } catch (e) { fail(e); }
+  };
+  $('#ai-check', m.el).onclick = () => run(true);
+  $('#ai-import', m.el).onclick = () => run(false);
 }
 
 // ------------------------------------------------------------------ task form
@@ -1028,6 +1102,7 @@ const ACT = {
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem('wb-theme', next); } catch (e) { /* private mode */ }
   },
+  'ai-fill': () => openAiFill(S.asset),
   'apply-template': async el => {
     const what = el.dataset.what;
     await POST(`/api/assets/${S.asset.id}/template`, { sections: what === 'sections', tasks: what === 'tasks' }).catch(fail);
