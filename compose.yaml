@@ -1,0 +1,14 @@
+services:
+  wrenchbook:
+    build: .
+    image: wrenchbook:latest
+    container_name: wrenchbook
+    restart: unless-stopped
+    user: "1000:1000"
+    ports:
+      - "8300:8000"
+    volumes:
+      - ./data:/data
+    # Optional; set in .env next to this file (see .env.example)
+    environment:
+      - WRENCHBOOK_PASSWORD=${WRENCHBOOK_PASSWORD:-}

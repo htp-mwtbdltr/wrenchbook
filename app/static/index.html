@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#161a21">
+  <title>Wrenchbook</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23e8590c'/%3E%3Cpath d='M19.6 8.4a1.3 1.3 0 0 0 0 1.9l2.1 2.1a1.3 1.3 0 0 0 1.9 0l4.2-4.2a8 8 0 0 1-10.6 10.6l-7.4 7.4a2.8 2.8 0 0 1-4-4l7.4-7.4A8 8 0 0 1 23.8 4.2z' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' transform='translate(-1.5 1) scale(.92)'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+  <script>try { const t = localStorage.getItem('wb-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="#/"><span class="brand-mark" id="brand-mark"></span>Wrenchbook</a>
+    <form class="side-search" id="side-search">
+      <span id="search-icon"></span>
+      <input type="search" name="q" placeholder="Search parts, specs, logs…  /" autocomplete="off">
+    </form>
+    <a class="nav-link" href="#/" data-nav="garage"><span data-icon="home"></span>Garage<span class="count hidden" id="nav-due"></span></a>
+    <a class="nav-link" href="#/log" data-nav="log"><span data-icon="clipboard"></span>Service log</a>
+    <a class="nav-link" href="#/guides" data-nav="guides"><span data-icon="book"></span>Guides</a>
+    <div class="nav-label">Vehicles &amp; equipment</div>
+    <div class="side-assets" id="side-assets"></div>
+    <div class="side-foot">
+      <button type="button" data-act="theme" title="Toggle theme"><span data-icon="moon"></span>Theme</button>
+      <a href="/api/export" title="Download a JSON backup of everything except uploaded files"><span data-icon="download"></span>Export</a>
+    </div>
+  </aside>
+  <main>
+    <div class="mobile-top">
+      <a class="brand" href="#/"><span class="brand-mark" id="brand-mark-m"></span>Wrenchbook</a>
+      <button class="btn icon" data-act="theme" title="Toggle theme"><span data-icon="moon"></span></button>
+    </div>
+    <div id="main"><div class="loading">Loading…</div></div>
+  </main>
+</div>
+<nav class="bottom-nav">
+  <a href="#/" data-nav="garage"><span data-icon="home"></span>Garage<span class="count hidden" id="nav-due-m"></span></a>
+  <a href="#/log" data-nav="log"><span data-icon="clipboard"></span>Log</a>
+  <a href="#/guides" data-nav="guides"><span data-icon="book"></span>Guides</a>
+  <a href="#/search" data-nav="search"><span data-icon="search"></span>Search</a>
+</nav>
+<div class="toasts" id="toasts"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
